@@ -1,0 +1,8 @@
+#!/bin/sh
+
+# https://www.defaults-write.com/active-defaults-setting-for-os-x-launchpad/
+
+defaults write com.apple.dock ResetLaunchPad -bool TRUE
+killall Dock
+sleep 2
+defaults write com.apple.dock ResetLaunchPad -bool FALSE
