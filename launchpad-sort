@@ -1,0 +1,69 @@
+#!/bin/sh
+
+# https://www.defaults-write.com/change-the-layout-rows-and-columns-of-launchpad/
+
+LAUNCHPAD_COLUMNS=$(defaults read com.apple.dock springboard-columns 2>/dev/null || echo 7)
+LAUNCHPAD_ROWS=$(defaults read com.apple.dock springboard-rows 2>/dev/null || echo 5)
+LAUNCHPAD_SIZE=$((LAUNCHPAD_COLUMNS * LAUNCHPAD_ROWS))
+
+# http://fgimian.github.io/blog/2016/12/23/how-macos-stores-launchpad-configuration/
+
+LAUNCHPAD_DB=$(getconf DARWIN_USER_DIR)com.apple.dock.launchpad/db/db
+
+FROM_STD_APPS="
+FROM items , apps
+WHERE items.rowid = apps.item_id
+AND items.type = 4 -- apps
+AND items.parent_id IN (
+    SELECT rowid
+    FROM items
+    WHERE type = 3 -- page
+    AND parent_id = 1 -- launchpad_root
+    AND ordering > 1 -- not first page
+)
+"
+
+CURRENT_ORDER=$(
+sqlite3 "$LAUNCHPAD_DB" << EOF
+SELECT apps.title
+$FROM_STD_APPS
+ORDER BY items.parent_id ASC , items.ordering ASC
+EOF
+)
+
+ALPHABETIC_ORDER=$(
+sqlite3 "$LAUNCHPAD_DB" << EOF
+SELECT apps.title
+$FROM_STD_APPS
+ORDER BY apps.title COLLATE NOCASE ASC
+EOF
+)
+
+test "$CURRENT_ORDER" = "$ALPHABETIC_ORDER" && exit 0
+
+FIRST_GROUP_ID=$(
+sqlite3 "$LAUNCHPAD_DB" << EOF
+SELECT MIN(items.parent_id)
+$FROM_STD_APPS
+EOF
+)
+
+(
+sqlite3 "$LAUNCHPAD_DB" << EOF
+SELECT items.rowid
+$FROM_STD_APPS
+ORDER BY apps.title COLLATE NOCASE ASC
+EOF
+) |
+awk "
+BEGIN { print \"UPDATE dbinfo SET value = 1 WHERE key = 'ignore_items_update_triggers' ;\"}
+{
+print \"UPDATE items SET parent_id =\" , $FIRST_GROUP_ID + int((NR - 1) / $LAUNCHPAD_SIZE) ,
+    \", ordering =\" , ((NR - 1) % $LAUNCHPAD_SIZE) ,
+    \"WHERE rowid =\" , \$1 , \";\"
+}
+END   { print \"UPDATE dbinfo SET value = 0 WHERE key = 'ignore_items_update_triggers' ;\"}
+" |
+sqlite3 "$LAUNCHPAD_DB"
+
+killall Dock
