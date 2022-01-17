@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+while [ $# -gt 0 ]; do
+	INPUT_FILE=$1
+	shift
+	echo "$INPUT_FILE"
+	if [[ "$INPUT_FILE" == *.webloc ]]; then
+		URL=$(/usr/libexec/PlistBuddy -c "Print:URL" "$INPUT_FILE")
+		OUTPUT_FILE=$(echo $INPUT_FILE | sed -e 's:\.webloc$:\.url:')
+		cat >"$OUTPUT_FILE" <<EOF
+[InternetShortcut]
+URL=$URL
+EOF
+	else
+		echo skipped "$INPUT_FILE" >2
+	fi
+done
