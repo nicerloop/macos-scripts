@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# set -x
+
+TYPE="_rfb._tcp."
+SERVICES=$(
+	(timeout 1s dns-sd -B "$TYPE" || true) | tail -n +5 | cut -c 74- | sort -u
+)
+SERVERS=$(
+	echo "$SERVICES" | while read -r SERVICE; do
+		SERVER=$(
+			(timeout 1s dns-sd -L "$SERVICE" "$TYPE" || true) 2>&1 | grep 'can be reached' | sed -e 's|.* can be reached at ||' -e 's|\.:.*||' | sort -u
+		)
+		echo "$SERVER"
+	done
+)
+RESOURCES=$SERVERS
+if [ $# -eq 0 ]; then
+	echo "$RESOURCES"
+else
+	while [ $# -gt 0 ]; do
+		LOGIN=$(
+			echo "$1" | cut -d '@' -f 1 -s
+		)
+		SEARCH=$(
+			echo "$1" | cut -d '@' -f 2
+		)
+		shift
+		MATCHES=$(
+			echo "$RESOURCES" | grep "$SEARCH"
+		)
+		COUNT=$(
+			echo -n "$MATCHES" | wc -w | tr -d ' \t'
+		)
+		if [ "$COUNT" -eq 0 ]; then
+			MATCHES=$(
+				echo "$RESOURCES" | grep -i "$SEARCH"
+			)
+			COUNT=$(
+				echo -n "$MATCHES" | wc -w | tr -d ' \t'
+			)
+		fi
+		case "$COUNT" in
+		0)
+			echo no match found for "$SEARCH"
+			exit 1
+			;;
+		1)
+			RESOURCE=$MATCHES
+			echo found "$RESOURCE"
+			if [ -n "$LOGIN" ]; then
+				RESOURCE="$LOGIN@$RESOURCE"
+			fi
+			open "vnc://$RESOURCE"
+			;;
+		*)
+			echo found "$COUNT" matches for "$SEARCH"
+			echo "$MATCHES"
+			exit 2
+			;;
+		esac
+	done
+fi
