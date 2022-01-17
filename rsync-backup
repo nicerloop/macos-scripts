@@ -1,0 +1,164 @@
+#!/bin/sh
+
+# $1: TARGET: rsync://<user>@<host>/<path>
+# RSYNC_PASSWORD read from $HOME/.rsync/<user>@<host>
+
+# create snapshot
+SNAPSHOT_NAME=$(tmutil localsnapshot | cut -d ' ' -f 6)
+echo "Created local snapshot '$SNAPSHOT_NAME'"
+
+# check rsync version for proper URL parsing allowing UTC format
+RSYNC_VERSION_STRING=$(rsync --version | head -n 1)
+echo "$RSYNC_VERSION_STRING"
+if (
+    echo "3.2.3"
+    echo "$RSYNC_VERSION_STRING" | awk '{ print $3 }'
+) | sort -V -C; then
+    SNAPSHOT_EPOCH=$(date -j -f "%Y-%m-%d-%H%M%S" "$SNAPSHOT_NAME" "+%s")
+    # ISO8601 %Y-%m-%dT%H:%M:%S%z
+    BACKUP_NAME=$(date -j -f "%s" "$SNAPSHOT_EPOCH" "+%Y-%m-%dT%H:%M:%S%z")
+else
+    # append textuel TZ to snapshot name %Y-%m-%d-%H%M%S
+    BACKUP_NAME=$SNAPSHOT_NAME-$(date -j "+%Z")
+fi
+echo "Will create backup '$BACKUP_NAME'"
+
+# configure rsync
+TARGET=$1
+USER_HOST=$(echo "$TARGET" | sed -e 's|rsync://\(.*\)/.*|\1|')
+RSYNC_PASSWORD=$(cat "$HOME/.rsync/$USER_HOST")
+export RSYNC_PASSWORD
+
+# create work folder
+TEMP_DIR=$(mktemp -d)
+echo "Created work folder '$TEMP_DIR'"
+
+# create account folder
+ACCOUNT_NAME=$(whoami | tr '[:upper:]' '[:lower:]')@$(hostname -s | tr '[:upper:]' '[:lower:]')
+ACCOUNT_DIR=$TEMP_DIR/$ACCOUNT_NAME
+mkdir -p "$ACCOUNT_DIR"
+rsync --archive --relative "$TEMP_DIR/./$ACCOUNT_NAME/" "$TARGET"
+echo "Created account folder '$ACCOUNT_NAME'"
+
+# list existing backups
+rsync --archive --include "/latest" --include "/*/" --exclude "*" "$TARGET/$ACCOUNT_NAME/" "$ACCOUNT_DIR"
+echo "Listing existing backups in account"
+if [ -f "$ACCOUNT_DIR/latest" ]; then
+    LATEST_BACKUP_NAME=$(cat "$ACCOUNT_DIR/latest")
+    echo "Latest complete backup is '$LATEST_BACKUP_NAME'"
+    INCREMENTAL=--link-dest
+    INCREMENTAL_REFERENCE=../$LATEST_BACKUP_NAME
+    echo "Copy will be incremental"
+fi
+
+# attach snapshot
+SNAPSHOT_MOUNT_DIR=$ACCOUNT_DIR/$BACKUP_NAME
+mkdir "$SNAPSHOT_MOUNT_DIR"
+if /sbin/mount_apfs -o ro -s "com.apple.TimeMachine.$SNAPSHOT_NAME.local" "$HOME" "$SNAPSHOT_MOUNT_DIR" 2>&1; then
+    echo "Attached local snapshot '$SNAPSHOT_NAME'"
+    SNAPSHOT_BASE=$SNAPSHOT_MOUNT_DIR
+    SOURCE_NAME="snapshot"
+else
+    SOURCE_NAME="live"
+fi
+
+# backup snapshot or live
+TARGET_BACKUP=$TARGET/$ACCOUNT_NAME/$BACKUP_NAME
+rsync --archive -F --delete "$SNAPSHOT_BASE$HOME/" "$TARGET_BACKUP" "$INCREMENTAL" "$INCREMENTAL_REFERENCE"
+echo "Synchronized $SOURCE_NAME to backup '$BACKUP_NAME'"
+
+# detach snapshot
+if [ -n "$SNAPSHOT_BASE" ]; then
+    /sbin/umount "$SNAPSHOT_MOUNT_DIR"
+    echo "Detached local snapshot '$SNAPSHOT_NAME'"
+fi
+
+# delete snapshot
+tmutil deletelocalsnapshots "$SNAPSHOT_NAME"
+
+# mark latest backup
+echo "$BACKUP_NAME" >"$ACCOUNT_DIR/latest"
+rsync --archive --relative "$TEMP_DIR/./$ACCOUNT_NAME/latest" "$TARGET"
+echo "Marked backup '$BACKUP_NAME' as latest"
+
+# reformat existing backup dates for easier consumption
+# UTC: EPOCH "DAY" YEAR MONTH DAY HOUR "WEEK" YEAR_FOR_WEEK WEEK_IN_YEAR BACKUP_NAME
+BACKUP_TABLE=$(
+    find "$ACCOUNT_DIR" -type d -depth 1 -exec basename {} \; | grep -v '@eaDir' | (
+        while read -r OLD_BACKUP_NAME; do
+            # OLD_BACKUP_NAME to EPOCH
+            EPOCH=$(
+                # ISO8601 %Y-%m-%dT%H:%M:%S%z
+                date -j -f "%Y-%m-%dT%H:%M:%S%z" "$OLD_BACKUP_NAME" "+%s" 2>/dev/null ||
+                    # %Y-%m-%d-%H%M%S with textual TZ
+                    date -j -f "%Y-%m-%d-%H%M%S-%Z" "$OLD_BACKUP_NAME" "+%s" 2>/dev/null ||
+                    # %Y-%m-%d-%H%M%S
+                    date -j -f "%Y-%m-%d-%H%M%S" "$OLD_BACKUP_NAME" "+%s"
+            )
+            # EPOCH to UTC calendar
+            date -j -u -f "%s" "$EPOCH" "+%s DAY %Y %m %d %H WEEK %G %V $OLD_BACKUP_NAME"
+        done
+        # sort by EPOCH
+    ) | sort -k 1
+)
+echo "Found $(echo "$BACKUP_TABLE" | grep -c '[^[:blank:]]') backups"
+LATEST_EPOCH=$(echo "$BACKUP_TABLE" | tail -n 1 | cut -d ' ' -f 1)
+
+# list weekly backups to keep : last 9 weeks
+WEEKLY_RANGE=$(
+    for WEEKS in $(seq 0 9); do
+        date -j -f "%s" -v-"$WEEKS"w "$LATEST_EPOCH" "+WEEK %G %V"
+    done
+)
+WEEKLY_BACKUPS=$(
+    # sort by YEAR_FOR_WEEK, then by WEEK_IN_YEAR keeping only first
+    echo "$BACKUP_TABLE" | grep -F "$WEEKLY_RANGE" | sort -k 8,8 -k 9,9 -u
+)
+
+# list daily backups to keep : last 30 days
+DAILY_RANGE=$(
+    for DAYS in $(seq 0 30); do
+        date -j -f "%s" -v-"$DAYS"d "$LATEST_EPOCH" "+DAY %Y %m %d"
+    done
+)
+DAILY_BACKUPS=$(
+    # keey only in DAILY_RANGE, then sort by YEAR, MONTH, then by DAY keeping only the first
+    echo "$BACKUP_TABLE" | grep -F "$DAILY_RANGE" | sort -k 3,4 -k 5,5 -u
+)
+
+# list hourly backups to keep : last 24 hours
+HOURLY_RANGE=$(
+    for HOURS in $(seq 0 24); do
+        date -j -f "%s" -v-"$HOURS"H "$LATEST_EPOCH" "+DAY %Y %m %d %H"
+    done
+)
+HOURLY_BACKUPS=$(
+    # keep only in HOURLY_RANGE
+    echo "$BACKUP_TABLE" | grep -F "$HOURLY_RANGE"
+)
+
+# list backups to keep
+BACKUPS_TO_KEEP=$(
+    (
+        echo "$WEEKLY_BACKUPS"
+        echo "$DAILY_BACKUPS"
+        echo "$HOURLY_BACKUPS"
+    ) | sort -u
+)
+
+# list backups to remove
+BACKUPS_TO_REMOVE=$(
+    echo "$BACKUP_TABLE" | grep -v -F "$BACKUPS_TO_KEEP" | cut -d ' ' -f 10
+)
+echo "Found $(echo "$BACKUPS_TO_REMOVE" | grep -c '[^[:blank:]]') backups to remove"
+
+# remove obsolete backups
+for BACKUP_TO_REMOVE in $BACKUPS_TO_REMOVE; do
+    rmdir "$ACCOUNT_DIR/$BACKUP_TO_REMOVE"
+    rsync --archive --delete --include "/$BACKUP_TO_REMOVE/" --exclude "/*" "$ACCOUNT_DIR/" "$TARGET/$ACCOUNT_NAME/"
+    echo "Removed backup '$BACKUP_TO_REMOVE'"
+done
+
+# delete work folder
+rm -rf "$TEMP_DIR"
+echo "Deleted work folder '$TEMP_DIR'"
