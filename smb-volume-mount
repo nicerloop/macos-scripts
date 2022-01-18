@@ -59,38 +59,44 @@ else
 				exit 3
 			fi
 			if [ -n "$LOGIN" ]; then
-				SERVER=$(
-					echo "$RESOURCE" | cut -d '/' -f 1 # | sed -e"s:$TYPE::"
+				SERVERS=$(
+					echo "$RESOURCE" | cut -d '/' -f 1
+					echo "$RESOURCE" | cut -d '/' -f 1 | sed -e"s:$TYPE::" | tr "[:upper:]" "[:lower:]"
 				)
 				PASSWORD=$(
 					security find-internet-password -r "smb " -s "$SERVER" -a "$LOGIN" -w
 				)
-				# if [ -z "$PASSWORD" ]; then
-				# 	# https://git-scm.com/docs/git-credential
-				# 	# https://git-scm.com/docs/gitcredentials
-				# 	# https://github.com/lastpass/lastpass-cli/blob/master/contrib/examples/git-credential-lastpass
-				# 	# https://github.com/git/git/blob/master/contrib/credential/osxkeychain/git-credential-osxkeychain.c
-				# 	# https://github.com/frederick888/git-credential-keepassxc
-				# 	GIT_CREDENTIAL_HELPERS=$(
-				# 		git config -l | grep "credential.helper" | cut -d '=' -f 2
-				# 	)
-				# 	for PROTOCOL in smb https http; do
-				# 		for GIT_CREDENTIAL_HELPER in $GIT_CREDENTIAL_HELPERS; do
-				# 			PASSWORD=$(
-				# 				printf "protocol=%s\nhost=%s\nusername=%s\n" "$PROTOCOL" "$SERVER" "$LOGIN" |
-				# 					git credential-"$GIT_CREDENTIAL_HELPER" get |
-				# 					grep password |
-				# 					cut -c 10-
-				# 			)
-				# 			if [ -n "$PASSWORD" ]; then
-				# 				break
-				# 			fi
-				# 		done
-				# 		if [ -n "$PASSWORD" ]; then
-				# 			break
-				# 		fi
-				# 	done
-				# fi
+				if [ -z "$PASSWORD" ]; then
+					# https://git-scm.com/docs/git-credential
+					# https://git-scm.com/docs/gitcredentials
+					# https://github.com/lastpass/lastpass-cli/blob/master/contrib/examples/git-credential-lastpass
+					# https://github.com/git/git/blob/master/contrib/credential/osxkeychain/git-credential-osxkeychain.c
+					# https://github.com/frederick888/git-credential-keepassxc
+					GIT_CREDENTIAL_HELPERS=$(
+						git config -l | grep "credential.helper" | cut -d '=' -f 2
+					)
+					for PROTOCOL in smb https http; do
+						for SERVER in $SERVERS; do
+							for GIT_CREDENTIAL_HELPER in $GIT_CREDENTIAL_HELPERS; do
+								PASSWORD=$(
+									printf "protocol=%s\nhost=%s\nusername=%s\n" "$PROTOCOL" "$SERVER" "$LOGIN" |
+										git credential-"$GIT_CREDENTIAL_HELPER" get |
+										grep password |
+										cut -c 10-
+								)
+								if [ -n "$PASSWORD" ]; then
+									break
+								fi
+							done
+							if [ -n "$PASSWORD" ]; then
+								break
+							fi
+						done
+						if [ -n "$PASSWORD" ]; then
+							break
+						fi
+					done
+				fi
 				CREDENTIALS="$LOGIN:$PASSWORD"
 			else
 				CREDENTIALS="GUEST"
