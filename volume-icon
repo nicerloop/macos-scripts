@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+if [ -z "$1" ]; then
+    echo missing icns argument
+    exit 1
+fi
+if [ -z "$2" ]; then
+    echo missing volume argument
+    exit 2
+fi
+cp -v "$1" "$2/.VolumeIcon.icns"
+SetFile -a C "$2"
