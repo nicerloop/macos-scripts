@@ -1,0 +1,134 @@
+#!/usr/bin/env bash
+#
+# brew install wine
+# brew install exiftool
+# brew install icoutils
+# brew install coreutils (gsort)
+#
+
+wine --version || ( echo "missing wine" ; exit )
+echo -n "exiftool " ; exiftool -ver || ( echo "missing exiftool" ; exit )
+icotool --version | grep icoutils || ( echo "missing icoutils" ; exit )
+wrestool --version | grep icoutils || ( echo "missing icoutils" ; exit )
+gsort --version | grep coreutils || ( echo "missing coreutils" ; exit )
+
+PREFIX="${WINEPREFIX:-$HOME/.wine}"
+echo "Wine Prefix:            $PREFIX"
+
+SEARCH_TARGET="$1.exe"
+echo "Searching:              $SEARCH_TARGET"
+TARGET_EXE=$(find "$PREFIX" -iname "$SEARCH_TARGET")
+test -f "$TARGET_EXE" || echo " /!\ $SEARCH_TARGET not found"
+SEARCH_PROPOSAL="$1*.exe"
+PROPOSED_EXE=$(find "$PREFIX" -iname "$SEARCH_PROPOSAL")
+PROPOSED_NAME=$(basename -s.exe "$PROPOSED_EXE" )
+test -f "$TARGET_EXE" || echo "Do you mean $PROPOSED_NAME ?"
+test -f "$TARGET_EXE" || exit
+
+FILE_NAME=$(exiftool -s3 -FileName "$TARGET_EXE")
+TIME_STAMP=$(exiftool -s3 -TimeStamp "$TARGET_EXE")
+PRODUCT_NAME=$(exiftool -s3 -ProductName "$TARGET_EXE")
+PRODUCT_VERSION=$(exiftool -s3 -ProductVersion "$TARGET_EXE")
+PRODUCT_VERSION_NUMBER=$(exiftool -s3 -ProductVersionNumber "$TARGET_EXE")
+
+BUNDLE_IDENTIFIER=wine.launcher.$(echo "$PRODUCT_NAME" | tr -C -d "A-Za-z0-9-.")
+
+echo "Launcher Target:        $TARGET_EXE"
+echo "File Name:              $FILE_NAME"
+echo "Time Stamp:             $TIME_STAMP"
+echo "Product Name:           $PRODUCT_NAME"
+echo "Product Version:        $PRODUCT_VERSION"
+echo "Product Version Number: $PRODUCT_VERSION_NUMBER"
+
+echo "Bundle Identifier:      $BUNDLE_IDENTIFIER"
+
+WINE=$( which wine )
+
+echo "Wine:                   $WINE"
+
+read -p "Press ENTER to continue" -r
+
+APP_DIR="$PRODUCT_NAME".app
+WORK_DIR=$(mktemp -d)
+(
+cd "$WORK_DIR" || exit
+echo Work Directory: "$WORK_DIR"
+BIN_DIR="$APP_DIR"/Contents/MacOS
+mkdir -p "$BIN_DIR"
+cd "$BIN_DIR" || exit
+cat > "$FILE_NAME" << EOF
+#!/bin/sh
+# WINEPREFIX="$PREFIX" exec $WINE "$TARGET_EXE"
+WINEPREFIX="$PREFIX" $WINE "$TARGET_EXE" &
+EOF
+chmod +x "$FILE_NAME"
+
+cd ..
+mkdir Resources
+cd Resources || exit
+# https://developer.apple.com/library/content/documentation/Xcode/Reference/xcode_ref-Asset_Catalog_Format/IconSetType.html
+# https://stackoverflow.com/questions/12306223/how-to-manually-create-icns-files-using-iconutil
+PRODUCT_ICO="$PRODUCT_NAME".ico
+PRODUCT_ICONSET="$PRODUCT_NAME".iconset
+PRODUCT_ICNS="$PRODUCT_NAME".icns
+mkdir "$PRODUCT_ICONSET"
+PRODUCT_ICON_NAME=$(wrestool -t 14 "$TARGET_EXE" | head -n 1 | cut -d ' ' -f 2 | cut -d '=' -f 2)
+wrestool -x -t 14 -n "$PRODUCT_ICON_NAME" -o "$PRODUCT_ICO" "$TARGET_EXE"
+icotool -x -o "$PRODUCT_ICONSET" "$PRODUCT_ICO"
+cd "$PRODUCT_ICONSET" || exit
+# identify images
+for f in *
+do
+	PNG_WIDTH=$(basename -s ".png" "$f" | cut -d '_' -f 3 | cut -d 'x' -f 1)
+	PNG_DEPTH=$(basename -s ".png" "$f" | cut -d '_' -f 3 | cut -d 'x' -f 3)
+  mv "$f" "$PNG_DEPTH.$PNG_WIDTH.png"
+done
+# resize is necessary
+for f in *
+do
+	PNG_DEPTH=$(basename -s ".png" "$f" | cut -d '.' -f 1)
+	PNG_WIDTH=$(basename -s ".png" "$f" | cut -d '.' -f 2)
+  MULTIPLE_WIDTH=$((2**($(echo "obase=2; $PNG_WIDTH" | bc | wc -m) - 2)))
+  if [ "$PNG_WIDTH" != $MULTIPLE_WIDTH ];
+  then
+    MULTIPLE_TGT="$PNG_DEPTH.$MULTIPLE_WIDTH.png"
+    if [ ! -e "$MULTIPLE_TGT" ];
+    then
+      sips -z $MULTIPLE_WIDTH $MULTIPLE_WIDTH "$f" --out "$MULTIPLE_TGT"
+    fi
+  fi
+done
+# prepare for icns
+for f in $(ls . | gsort -V)
+do
+	PNG_WIDTH=$(basename -s ".png" "$f" | cut -d '.' -f 2)
+	PNG_HALF_WIDTH=$((PNG_WIDTH / 2))
+	PNG_ICON_NAME="icon_${PNG_WIDTH}x${PNG_WIDTH}.png"
+	mv "$f" "$PNG_ICON_NAME"
+	cp "$PNG_ICON_NAME" "icon_${PNG_HALF_WIDTH}x${PNG_HALF_WIDTH}@2x.png"
+done
+cd ..
+iconutil --convert icns "${PRODUCT_ICONSET}" --output "${PRODUCT_ICNS}"
+rm -rf "$PRODUCT_ICONSET"
+rm -rf "$PRODUCT_ICO"
+
+cd ..
+# https://developer.apple.com/library/content/documentation/CoreFoundation/Conceptual/CFBundles/BundleTypes/BundleTypes.html#//apple_ref/doc/uid/10000123i-CH101-SW19
+cat << EOF | plutil -convert xml1 -o Info.plist -
+{
+  "CFBundleName" : "$PRODUCT_NAME",
+  "CFBundleDisplayName" : "$PRODUCT_NAME",
+  "CFBundleIdentifier" : "$BUNDLE_IDENTIFIER",
+  "CFBundleVersion" : "$PRODUCT_VERSION_NUMBER",
+  "CFBundlePackageType" : "APPL",
+  "CFBundleSignature" : "????",
+  "CFBundleExecutable" : "$FILE_NAME",
+  "CFBundleShortVersionString" : "$PRODUCT_VERSION",
+  "CFBundleIconFile" : "$PRODUCT_ICNS",
+}
+EOF
+#  "NSHumanReadableCopyright" : "Copyright not specified",
+#  "NSAppleScriptEnabled" : false,
+)
+
+mv "$WORK_DIR"/"$APP_DIR" .
