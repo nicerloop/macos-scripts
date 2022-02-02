@@ -1,0 +1,5 @@
+#!/bin/sh
+sudo xcode-select --reset
+#https://developer.apple.com/library/archive/technotes/tn2339/_index.html#//apple_ref/doc/uid/DTS40014588-CH1-HOW_CAN_I_UNINSTALL_THE_COMMAND_LINE_TOOLS_
+sudo rm -rvf /Library/Developer/CommandLineTools
+xcode-select --install
