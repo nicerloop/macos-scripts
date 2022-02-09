@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+
+set -e
+
+enable_sudo_pam_module() {
+  module="$1"
+  strategy="$2"
+  file="/etc/pam.d/sudo"
+  grep -q -e "$module" "$file" || sudo ed -s "$file" <<EOF
+1a
+auth    $strategy    $module
+.
+w
+EOF
+}
+
+# https://akrabat.com/add-touchid-authentication-to-sudo/
+enable_sudo_pam_module pam_tid.so sufficient
+  # https://github.com/fabianishere/pam_reattach
+test -e /usr/local/lib/pam/pam_watchid.so && enable_sudo_pam_module pam_watchid.so sufficient
+test -e /usr/local/lib/pam/pam_reattach.so && enable_sudo_pam_module pam_reattach.so optional
