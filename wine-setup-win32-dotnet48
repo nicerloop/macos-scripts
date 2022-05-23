@@ -1,4 +1,0 @@
-#!/bin/sh
-export WINEARCH=win32
-# export WINEPREFIX=~/.wine32
-winetricks -q --force win7 fontsmooth=rgb corefonts dotnet48
