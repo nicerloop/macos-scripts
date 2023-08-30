@@ -1,9 +1,12 @@
 #!/bin/sh
 
+while test $# -gt 0
+do
 
 MAS_ID="$1"
+shift
 MAS_HTML=$(
-    curl "https://apps.apple.com/app/broadcasts/id$MAS_ID"
+    curl -s "https://apps.apple.com/app/broadcasts/id$MAS_ID"
 )
 MAS_SCRIPT=$(
     printf '%s' "$MAS_HTML" |
@@ -37,3 +40,5 @@ printf '%s' "$MAS_VERSIONS" |
     . |
     ( \"$MAS_ID : $MAS_NAME : \" + .platform + \" : \" + .version)
 "
+
+done
