@@ -1,16 +1,5 @@
 #!/bin/sh
 
-# curl "https://apps.apple.com/app/broadcasts/id$1" |
-#     tr -d '\n' |
-#     sed -e's:.*<script type="fastboot/shoebox" id="shoebox-media-api-cache-apps">::' -e's:</script>.*::' |
-#     jq '
-#         to_entries |
-#         .[0].value |
-#         fromjson |
-#         .d[0].attributes.platformAttributes |
-#         to_entries[] |
-#         { platform: .key , version : .value.versionHistory[0].versionDisplay }
-#     '
 
 MAS_ID="$1"
 MAS_HTML=$(
@@ -29,6 +18,12 @@ MAS_JSON=$(
         fromjson
     '
 )
+MAS_NAME=$(
+    printf '%s' "$MAS_JSON" |
+        jq -r '
+        .d[0].attributes.name
+    '
+)
 MAS_VERSIONS=$(
     printf '%s' "$MAS_JSON" |
         jq '
@@ -37,6 +32,8 @@ MAS_VERSIONS=$(
         { platform: .key , version : .value.versionHistory[0].versionDisplay }
     '
 )
-# MAS_VERSIONS=$(
-# )
-printf '%s' "$MAS_VERSIONS"
+printf '%s' "$MAS_VERSIONS" |
+    jq -r "
+    . |
+    ( \"$MAS_ID : $MAS_NAME : \" + .platform + \" : \" + .version)
+"
