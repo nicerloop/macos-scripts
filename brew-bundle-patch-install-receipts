@@ -2,6 +2,7 @@
 
 BREWFILE="${1:-Brewfile}"
 
+if [ -f "$BREWFILE" ]; then
 find /usr/local/Cellar -name INSTALL_RECEIPT.json | (
     while read -r INSTALL_RECEIPT; do
         FORMULA=$(echo "$INSTALL_RECEIPT" | cut -d '/' -f 5)
@@ -26,3 +27,7 @@ find /usr/local/Cellar -name INSTALL_RECEIPT.json | (
         fi
     done
 )
+else
+    echo "$BREWFILE" not found
+    exit 1
+fi
