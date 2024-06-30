@@ -6,7 +6,7 @@ do
 MAS_ID="$1"
 shift
 MAS_HTML=$(
-    curl -s "https://apps.apple.com/app/broadcasts/id$MAS_ID"
+    curl -sL "https://apps.apple.com/app/id$MAS_ID"
 )
 MAS_SCRIPT=$(
     printf '%s' "$MAS_HTML" |
