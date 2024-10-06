@@ -3,7 +3,6 @@
 # https://www.defaults-write.com/active-defaults-setting-for-os-x-launchpad/
 
 defaults write com.apple.dock ResetLaunchPad -bool TRUE
-launchctl stop com.apple.Dock.agent
-launchctl start com.apple.Dock.agent
+killall Dock
 sleep 2
 defaults write com.apple.dock ResetLaunchPad -bool FALSE

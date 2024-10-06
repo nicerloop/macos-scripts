@@ -66,5 +66,4 @@ END   { print \"UPDATE dbinfo SET value = 0 WHERE key = 'ignore_items_update_tri
 " |
 sqlite3 "$LAUNCHPAD_DB"
 
-launchctl stop com.apple.Dock.agent
-launchctl start com.apple.Dock.agent
+killall Dock
